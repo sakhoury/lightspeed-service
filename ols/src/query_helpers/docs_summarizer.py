@@ -4,6 +4,7 @@
 import asyncio
 import json
 import logging
+from contextlib import aclosing
 from typing import Any, AsyncGenerator, Callable, Optional
 
 from langchain_core.globals import set_debug
@@ -298,40 +299,45 @@ class DocsSummarizer(QueryHelper):
                 tool_call_chunks = []
                 chunk_counter = 0
                 # invoke LLM and process response chunks
-                async for chunk in self._invoke_llm(
+                # Use aclosing to ensure proper cleanup of the async generator
+                # when exiting early (e.g., on finish_reason="stop"). This prevents
+                # the HTTP connection from being abandoned and cleaned up by GC.
+                async with aclosing(self._invoke_llm(
                     messages,
                     llm_input_values,
                     tools_map=all_mcp_tools,
                     is_final_round=is_final_round,
                     token_counter=token_counter,
-                ):
-                    # TODO: Temporary fix for fake-llm (load test) which gives
-                    # output as string. Currently every method that we use gives us
-                    # proper output, except fake-llm. We need to move to a different
-                    # fake-llm (or custom fake-llm) which can handle streaming/non-streaming
-                    # & tool calling and gives response not as string. Even below
-                    # temp fix will fail for tool calling.
-                    # (load test can be run with tool calling set to False till we
-                    # have a permanent fix)
-                    if isinstance(chunk, str):
-                        yield StreamedChunk(type="text", text=chunk)
-                        break
+                )) as llm_stream:
+                    async for chunk in llm_stream:
+                        # TODO: Temporary fix for fake-llm (load test) which gives
+                        # output as string. Currently every method that we use gives us
+                        # proper output, except fake-llm. We need to move to a different
+                        # fake-llm (or custom fake-llm) which can handle streaming/non-streaming
+                        # & tool calling and gives response not as string. Even below
+                        # temp fix will fail for tool calling.
+                        # (load test can be run with tool calling set to False till we
+                        # have a permanent fix)
+                        if isinstance(chunk, str):
+                            yield StreamedChunk(type="text", text=chunk)
+                            break
 
-                    # check if LLM has finished generating
-                    if chunk.response_metadata.get("finish_reason") == "stop":  # type: ignore [attr-defined]
-                        return
+                        # collect tool chunk or yield text
+                        if getattr(chunk, "tool_call_chunks", None):
+                            tool_call_chunks.append(chunk)
+                        else:
+                            if not skip_special_chunk(
+                                chunk.content, chunk_counter, self.model, is_final_round
+                            ):
+                                # stream text chunks directly
+                                yield StreamedChunk(type="text", text=chunk.content)
 
-                    # collect tool chunk or yield text
-                    if getattr(chunk, "tool_call_chunks", None):
-                        tool_call_chunks.append(chunk)
-                    else:
-                        if not skip_special_chunk(
-                            chunk.content, chunk_counter, self.model, is_final_round
-                        ):
-                            # stream text chunks directly
-                            yield StreamedChunk(type="text", text=chunk.content)
+                        # check if LLM has finished generating
+                        # NOTE: Must be AFTER yielding content, as final chunk may contain text
+                        if chunk.response_metadata.get("finish_reason") == "stop":  # type: ignore [attr-defined]
+                            return
 
-                    chunk_counter += 1
+                        chunk_counter += 1
 
                 # exit if this was the final round
                 if is_final_round:

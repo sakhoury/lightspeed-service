@@ -79,9 +79,10 @@ class GradioUI:
         json_data = json.dumps(data)
 
         try:
-            # Make the HTTP POST request, wait for response with 90 seconds timeout
+            # Make the HTTP POST request, wait for response with 600 seconds timeout
+            # (tool calls via MCP can take significant time)
             response = requests.post(
-                self.ols_url, headers=headers, data=json_data, timeout=90
+                self.ols_url, headers=headers, data=json_data, timeout=600
             )
 
             # Check if the request was successful (status code 200)

@@ -70,3 +70,6 @@ dist/
 
 # uv-related
 uv.lock
+
+# ignore .olsconfig directory
+.olsconfig

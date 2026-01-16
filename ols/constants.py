@@ -237,4 +237,9 @@ STREAMABLE_HTTP_TRANSPORT_DEFAULT_READ_TIMEOUT = 10  # in seconds
 
 # timeout value for a single llm with tools round
 # Keeping it really high at this moment (until this is configurable)
-TOOL_CALL_ROUND_TIMEOUT = 300
+# High value needed for local LLMs (e.g., Ollama) which can be slow
+TOOL_CALL_ROUND_TIMEOUT = 600
+
+# timeout for HTTPX client used to communicate with LLM providers
+# High value needed for local LLMs (e.g., Ollama) which can be slow
+LLM_CLIENT_TIMEOUT = 600  # in seconds

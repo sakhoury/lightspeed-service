@@ -5,10 +5,23 @@ import os
 from datetime import timedelta
 from typing import Any
 
+import httpx
+
 from ols.app.models.config import MCPServerConfig
 from ols.utils import checks
 
 logger = logging.getLogger(__name__)
+
+
+def _create_insecure_httpx_client_factory() -> Any:
+    """Create a factory that produces httpx clients with SSL verification disabled."""
+
+    def factory(**kwargs: Any) -> httpx.AsyncClient:
+        # Override verify to False, pass through all other arguments
+        kwargs["verify"] = False
+        return httpx.AsyncClient(**kwargs)
+
+    return factory
 
 # Constant, defining usage of kubernetes token
 KUBERNETES_PLACEHOLDER = "kubernetes"
@@ -29,9 +42,23 @@ class MCPConfigBuilder:
         logger.debug("Updating env configuration of openshift stdio mcp server")
         env = {**server_envs}
 
-        if "OC_USER_TOKEN" in env:
-            logger.warning("OC_USER_TOKEN is set, overriding with actual user token.")
-        env["OC_USER_TOKEN"] = self.user_token
+        # Determine which token to use
+        # Priority: 1. User token from request, 2. Environment variable
+        if self.user_token and self.user_token != "token-not-set":  # noqa: S105
+            if "OC_USER_TOKEN" in env:
+                logger.warning("OC_USER_TOKEN is set, overriding with actual user token.")
+            env["OC_USER_TOKEN"] = self.user_token
+        elif "OC_USER_TOKEN" in os.environ:
+            logger.info(
+                "Using OC_USER_TOKEN from environment (no user token from request)"
+            )
+            env["OC_USER_TOKEN"] = os.environ["OC_USER_TOKEN"]
+        else:
+            logger.warning(
+                "No OC_USER_TOKEN available from request or environment. "
+                "MCP tools may fail with authentication errors."
+            )
+            env["OC_USER_TOKEN"] = "token-not-set"  # noqa: S105
 
         if "KUBECONFIG" not in env:
             if "KUBECONFIG" in os.environ:
@@ -77,6 +104,8 @@ class MCPConfigBuilder:
                 http_conf["headers"] = self._resolve_tokens_to_value(
                     http_conf["headers"]
                 )
+                # Extract verify_ssl before updating (not a langchain-mcp option)
+                verify_ssl = http_conf.pop("verify_ssl", True)
                 servers_conf[server_conf.name].update(http_conf)
                 # Note: Streamable HTTP transport expects timedelta instead of
                 # int as for the sse - blame langchain-mcp-adapters for
@@ -85,6 +114,15 @@ class MCPConfigBuilder:
                     servers_conf[server_conf.name][timeout] = timedelta(
                         seconds=servers_conf[server_conf.name][timeout]  # type: ignore [assignment]
                     )
+                # Add custom httpx client factory if SSL verification is disabled
+                if not verify_ssl:
+                    logger.warning(
+                        "SSL verification disabled for MCP server '%s'",
+                        server_conf.name,
+                    )
+                    servers_conf[server_conf.name][
+                        "httpx_client_factory"
+                    ] = _create_insecure_httpx_client_factory()
 
         return servers_conf
 
@@ -98,7 +136,7 @@ class MCPConfigBuilder:
                 try:
                     # load token value
                     with open(value, "r", encoding="utf-8") as token_store:
-                        token = token_store.read()
+                        token = token_store.read().strip()
                     updated[name] = token
                 except Exception as e:
                     raise checks.InvalidConfigurationError(

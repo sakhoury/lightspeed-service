@@ -366,8 +366,12 @@ class ProviderConfig(BaseModel):
             constants.PROVIDER_OPENAI,
             constants.PROVIDER_AZURE_OPENAI,
         ):
-            self.certificates_store = os.path.join(
-                certificate_directory, constants.CERTIFICATE_STORAGE_FILENAME
+            # Use certificates_store from config if specified, otherwise use default
+            self.certificates_store = data.get(
+                "certificates_store",
+                os.path.join(
+                    certificate_directory, constants.CERTIFICATE_STORAGE_FILENAME
+                ),
             )
         self.tls_security_profile = TLSSecurityProfile(
             data.get("tlsSecurityProfile", None)
@@ -594,6 +598,7 @@ class StreamableHttpTransportConfig(BaseModel):
     timeout: int = constants.STREAMABLE_HTTP_TRANSPORT_DEFAULT_TIMEOUT
     sse_read_timeout: int = constants.STREAMABLE_HTTP_TRANSPORT_DEFAULT_READ_TIMEOUT
     headers: dict[str, str] = Field(default_factory=dict)
+    verify_ssl: bool = True
 
 
 class MCPServerConfig(BaseModel):

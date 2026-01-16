@@ -14,6 +14,7 @@ from langchain_core.language_models.llms import LLM
 from ols import config
 from ols.app.models.config import ProviderConfig
 from ols.constants import (
+    LLM_CLIENT_TIMEOUT,
     PROVIDER_AZURE_OPENAI,
     PROVIDER_BAM,
     PROVIDER_FAKE,
@@ -391,8 +392,12 @@ class LLMProvider(AbstractLLMProvider):
                 "No security profiles. creating httpx.Client with verify %s", verify
             )
             if use_async:
-                return httpx.AsyncClient(verify=verify, proxies=proxy, mounts=mounts)
-            return httpx.Client(verify=verify, proxies=proxy, mounts=mounts)
+                return httpx.AsyncClient(
+                    verify=verify, proxies=proxy, mounts=mounts, timeout=LLM_CLIENT_TIMEOUT
+                )
+            return httpx.Client(
+                verify=verify, proxies=proxy, mounts=mounts, timeout=LLM_CLIENT_TIMEOUT
+            )
 
         # security profile is set -> we need to retrieve SSL version and list of allowed ciphers
         ciphers = tls.ciphers_as_string(sec_profile.ciphers, sec_profile.profile_type)
@@ -420,5 +425,7 @@ class LLMProvider(AbstractLLMProvider):
             "With security profile, creating httpx.Client with verify %s", context
         )
         if use_async:
-            return httpx.AsyncClient(verify=context, proxies=proxy)
-        return httpx.Client(verify=context, proxies=proxy)
+            return httpx.AsyncClient(
+                verify=context, proxies=proxy, timeout=LLM_CLIENT_TIMEOUT
+            )
+        return httpx.Client(verify=context, proxies=proxy, timeout=LLM_CLIENT_TIMEOUT)
